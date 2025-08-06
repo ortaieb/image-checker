@@ -282,7 +282,7 @@ impl ValidationProcessor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::AnalysisRequest;
+    use crate::models::{AnalysisRequest, LocationRequest};
 
     fn create_test_config() -> Config {
         Config {
@@ -341,9 +341,11 @@ mod tests {
         let analysis_request = AnalysisRequest {
             image_path: None,
             content: "Three birds on a wire".to_string(),
-            location: Some(
-                "not more than 100m from coordinates (51.492191, -0.266108)".to_string(),
-            ),
+            location: Some(LocationRequest {
+                long: -0.266108,
+                lat: 51.492191,
+                max_distance: 100.0,
+            }),
             datetime: Some(
                 "image was taken not more than 10 minutes after 2025-08-01T15:23:00Z+1".to_string(),
             ),
@@ -358,6 +360,7 @@ mod tests {
         let location = context.location_constraint.unwrap();
         assert_eq!(location.max_distance_meters, 100.0);
         assert!((location.latitude - 51.492191).abs() < 0.000001);
+        assert!((location.longitude + 0.266108).abs() < 0.000001);
 
         let datetime = context.datetime_constraint.unwrap();
         assert_eq!(datetime.max_minutes_after, 10);

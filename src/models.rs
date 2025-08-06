@@ -23,13 +23,20 @@ impl ValidationRequest {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+pub struct LocationRequest {
+    pub long: f64,
+    pub lat: f64,
+    pub max_distance: f64,
+}
+
+#[derive(Debug, Deserialize, Clone)]
 pub struct AnalysisRequest {
     #[serde(rename = "image-path")]
     pub image_path: Option<String>,
 
     pub content: String,
 
-    pub location: Option<String>,
+    pub location: Option<LocationRequest>,
 
     pub datetime: Option<String>,
 }
@@ -84,50 +91,13 @@ pub struct LocationConstraint {
     pub longitude: f64,
 }
 
-impl FromStr for LocationConstraint {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        // Parse "not more than 100m from coordinates (51.492191, -0.266108)"
-        let parts: Vec<&str> = s.split_whitespace().collect();
-
-        if parts.len() < 8 {
-            return Err(format!("Invalid location format: {s}"));
+impl From<LocationRequest> for LocationConstraint {
+    fn from(request: LocationRequest) -> Self {
+        LocationConstraint {
+            max_distance_meters: request.max_distance,
+            latitude: request.lat,
+            longitude: request.long,
         }
-
-        // Extract distance (e.g., "100m")
-        let distance_str = parts[3];
-        let distance_meters = if let Some(stripped) = distance_str.strip_suffix("m") {
-            stripped
-                .parse::<f64>()
-                .map_err(|_| format!("Invalid distance: {distance_str}"))?
-        } else {
-            return Err(format!("Distance must end with 'm': {distance_str}"));
-        };
-
-        // Extract coordinates from "(lat, lon)"
-        let coords_part = parts[6..].join(" ");
-        let coords_part = coords_part.trim_start_matches('(').trim_end_matches(')');
-        let coord_parts: Vec<&str> = coords_part.split(',').collect();
-
-        if coord_parts.len() != 2 {
-            return Err(format!("Invalid coordinates format: {coords_part}"));
-        }
-
-        let latitude = coord_parts[0]
-            .trim()
-            .parse::<f64>()
-            .map_err(|_| format!("Invalid latitude: {}", coord_parts[0]))?;
-        let longitude = coord_parts[1]
-            .trim()
-            .parse::<f64>()
-            .map_err(|_| format!("Invalid longitude: {}", coord_parts[1]))?;
-
-        Ok(LocationConstraint {
-            max_distance_meters: distance_meters,
-            latitude,
-            longitude,
-        })
     }
 }
 
@@ -192,11 +162,7 @@ impl TryFrom<AnalysisRequest> for ValidationContext {
     type Error = String;
 
     fn try_from(request: AnalysisRequest) -> Result<Self, Self::Error> {
-        let location_constraint = if let Some(location) = request.location {
-            Some(LocationConstraint::from_str(&location)?)
-        } else {
-            None
-        };
+        let location_constraint = request.location.map(LocationConstraint::from);
 
         let datetime_constraint = if let Some(datetime) = request.datetime {
             Some(DateTimeConstraint::from_str(&datetime)?)
@@ -217,9 +183,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_location_constraint_parsing() {
-        let location_str = "not more than 100m from coordinates (51.492191, -0.266108)";
-        let constraint = LocationConstraint::from_str(location_str).unwrap();
+    fn test_location_constraint_from_request() {
+        let location_request = LocationRequest {
+            long: -0.266108,
+            lat: 51.492191,
+            max_distance: 100.0,
+        };
+        
+        let constraint = LocationConstraint::from(location_request);
 
         assert_eq!(constraint.max_distance_meters, 100.0);
         assert!((constraint.latitude - 51.492191).abs() < 0.000001);

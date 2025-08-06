@@ -24,9 +24,14 @@ fn test_haversine_distance_calculation() {
 }
 
 #[test]
-fn test_location_constraint_parsing() {
-    let location_str = "not more than 100m from coordinates (51.492191, -0.266108)";
-    let constraint = LocationConstraint::from_str(location_str).unwrap();
+fn test_location_constraint_from_request() {
+    let location_request = LocationRequest {
+        long: -0.266108,
+        lat: 51.492191,
+        max_distance: 100.0,
+    };
+    
+    let constraint = LocationConstraint::from(location_request);
 
     assert_eq!(constraint.max_distance_meters, 100.0);
     assert!((constraint.latitude - 51.492191).abs() < 0.000001);
@@ -34,37 +39,19 @@ fn test_location_constraint_parsing() {
 }
 
 #[test]
-fn test_location_constraint_parsing_variations() {
-    // Test different distance units and formats
+fn test_location_request_variations() {
+    // Test different valid location requests
     let variations = vec![
-        "not more than 50m from coordinates (0.0, 0.0)",
-        "not more than 1000m from coordinates (-90.0, -180.0)",
-        "not more than 25m from coordinates (90.0, 180.0)",
+        LocationRequest { long: 0.0, lat: 0.0, max_distance: 50.0 },
+        LocationRequest { long: -180.0, lat: -90.0, max_distance: 1000.0 },
+        LocationRequest { long: 180.0, lat: 90.0, max_distance: 25.0 },
     ];
 
-    for location_str in variations {
-        let result = LocationConstraint::from_str(location_str);
-        assert!(result.is_ok(), "Failed to parse: {}", location_str);
-    }
-}
-
-#[test]
-fn test_location_constraint_parsing_invalid() {
-    let invalid_strings = vec![
-        "invalid format",
-        "not more than meters from coordinates",
-        "not more than 100 from coordinates (51.0, -0.1)",
-        "not more than 100m from coordinates invalid",
-        "not more than 100m from coordinates (invalid, coords)",
-    ];
-
-    for invalid_str in invalid_strings {
-        let result = LocationConstraint::from_str(invalid_str);
-        assert!(
-            result.is_err(),
-            "Should have failed to parse: {}",
-            invalid_str
-        );
+    for location_request in variations {
+        let constraint = LocationConstraint::from(location_request.clone());
+        assert!(constraint.max_distance_meters > 0.0);
+        assert!(constraint.latitude >= -90.0 && constraint.latitude <= 90.0);
+        assert!(constraint.longitude >= -180.0 && constraint.longitude <= 180.0);
     }
 }
 
@@ -270,7 +257,11 @@ fn test_validation_context_creation() {
     let analysis_request = AnalysisRequest {
         image_path: None,
         content: "Three birds on a wire".to_string(),
-        location: Some("not more than 100m from coordinates (51.492191, -0.266108)".to_string()),
+        location: Some(LocationRequest {
+            long: -0.266108,
+            lat: 51.492191,
+            max_distance: 100.0,
+        }),
         datetime: Some(
             "image was taken not more than 10 minutes after 2025-08-01T15:23:00Z+1".to_string(),
         ),
@@ -284,6 +275,8 @@ fn test_validation_context_creation() {
 
     let location = context.location_constraint.unwrap();
     assert_eq!(location.max_distance_meters, 100.0);
+    assert!((location.latitude - 51.492191).abs() < 0.000001);
+    assert!((location.longitude + 0.266108).abs() < 0.000001);
 
     let datetime = context.datetime_constraint.unwrap();
     assert_eq!(datetime.max_minutes_after, 10);

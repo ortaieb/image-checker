@@ -277,7 +277,11 @@ async fn test_validation_request_with_location_and_datetime() {
         "image-path": "/tmp/test.jpg",
         "analysis-request": {
             "content": "Pub sign The Ale and Hops",
-            "location": "not more than 100m from coordinates (51.492191, -0.266108)",
+            "location": {
+                "long": -0.266108,
+                "lat": 51.492191,
+                "max_distance": 100.0
+            },
             "datetime": "image was taken not more than 10 minutes after 2025-08-01T15:23:00Z+1"
         }
     });

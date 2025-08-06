@@ -135,7 +135,11 @@ Submit an image for validation against specified criteria.
   "image-path": "path/to/image.jpg",
   "analysis-request": {
     "content": "Description of expected image content",
-    "location": "not more than 100m from coordinates (51.492191, -0.266108)",
+    "location": {
+      "long": -0.266108,
+      "lat": 51.492191,
+      "max_distance": 100.0
+    },
     "datetime": "image was taken not more than 10 minutes after 2025-08-01T15:23:00Z"
   }
 }
@@ -159,6 +163,12 @@ Submit an image for validation against specified criteria.
   "status": "accepted"
 }
 ```
+
+**Location Constraint Format:**
+The `location` field is optional but if provided, all three fields are required:
+- `long` (f64): Longitude in decimal degrees (-180.0 to 180.0)
+- `lat` (f64): Latitude in decimal degrees (-90.0 to 90.0)  
+- `max_distance` (f64): Maximum allowed distance from coordinates in meters
 
 **Status Codes:**
 - `202 Accepted` - Request queued successfully
@@ -293,7 +303,11 @@ curl -X POST http://localhost:3000/validate \
     "image-path": "photos/pub-sign.jpg",
     "analysis-request": {
       "content": "Pub sign The Ale and Hops",
-      "location": "not more than 100m from coordinates (51.492191, -0.266108)",
+      "location": {
+        "long": -0.266108,
+        "lat": 51.492191,
+        "max_distance": 100.0
+      },
       "datetime": "image was taken not more than 10 minutes after 2025-08-01T15:23:00Z"
     }
   }'
@@ -423,8 +437,14 @@ pub struct ValidationRequest {
 ```rust
 pub struct AnalysisRequest {
     pub content: String,
-    pub location: Option<String>,
+    pub location: Option<LocationRequest>,
     pub datetime: Option<String>,
+}
+
+pub struct LocationRequest {
+    pub long: f64,    // longitude
+    pub lat: f64,     // latitude  
+    pub max_distance: f64,  // maximum distance in meters
 }
 ```
 
@@ -569,7 +589,11 @@ async fn test_validation_with_location_constraint() {
         image_path: Some("test.jpg".to_string()),
         analysis_request: AnalysisRequest {
             content: "A red bicycle".to_string(),
-            location: Some("not more than 50m from coordinates (51.492191, -0.266108)".to_string()),
+            location: Some(LocationRequest {
+                long: -0.266108,
+                lat: 51.492191,
+                max_distance: 50.0,
+            }),
             datetime: None,
         }
     };
