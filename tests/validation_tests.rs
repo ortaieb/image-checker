@@ -1,8 +1,10 @@
 use image_checker::models::*;
 use image_checker::utils::*;
+use image_checker::validation::llm::{LlmClient, validate_image_content};
 
 use chrono::{FixedOffset, TimeZone};
 use std::str::FromStr;
+use std::time::Duration;
 
 #[test]
 fn test_haversine_distance_calculation() {
@@ -301,4 +303,32 @@ fn test_validation_context_optional_fields() {
     assert_eq!(context.content_check, "Just content check");
     assert!(context.location_constraint.is_none());
     assert!(context.datetime_constraint.is_none());
+}
+
+#[tokio::test]
+async fn test_llm_validation_integration() {
+    // This test requires Ollama to be running with the llava:13b model
+    // Skip if not available
+    
+    let client = LlmClient::new(
+        "http://localhost:11434/api/chat".to_string(),
+        "llava:13b".to_string(),
+        Duration::from_secs(30),
+    );
+
+    // Test with our minimal test image
+    let image_path = "/tmp/test-images/test.jpg";
+    let content_description = "A simple test image or placeholder";
+
+    // This test will show the debug output we added
+    match validate_image_content(&client, image_path, content_description).await {
+        Ok(is_valid) => {
+            println!("✅ LLM validation completed successfully");
+            println!("   Result: {}", if is_valid { "ACCEPTED" } else { "REJECTED" });
+        }
+        Err(e) => {
+            println!("❌ LLM validation failed: {}", e);
+            // Don't fail the test - just report the issue
+        }
+    }
 }

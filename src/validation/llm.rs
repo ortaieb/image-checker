@@ -1,6 +1,7 @@
 use base64::{engine::general_purpose, Engine as _};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::error::Error as StdError;
 use std::fs;
 use std::path::Path;
 use std::time::Duration;
@@ -30,37 +31,25 @@ pub enum LlmError {
 struct ChatCompletionRequest {
     model: String,
     messages: Vec<Message>,
-    max_tokens: Option<u32>,
-    temperature: Option<f32>,
+    stream: bool,
+    options: Options,
 }
 
 #[derive(Debug, Serialize)]
 struct Message {
     role: String,
-    content: Vec<ContentItem>,
+    content: String,
+    images: Option<Vec<String>>,
 }
 
 #[derive(Debug, Serialize)]
-#[serde(tag = "type")]
-enum ContentItem {
-    #[serde(rename = "text")]
-    Text { text: String },
-    #[serde(rename = "image_url")]
-    ImageUrl { image_url: ImageUrl },
-}
-
-#[derive(Debug, Serialize)]
-struct ImageUrl {
-    url: String,
+struct Options {
+    temperature: f32,
+    num_predict: u32,
 }
 
 #[derive(Debug, Deserialize)]
 struct ChatCompletionResponse {
-    choices: Vec<Choice>,
-}
-
-#[derive(Debug, Deserialize)]
-struct Choice {
     message: ResponseMessage,
 }
 
@@ -127,11 +116,10 @@ impl LlmClient {
         // Validate image format by checking file extension and magic bytes
         self.validate_image_format(path, &image_bytes)?;
 
-        // Encode to base64
+        // Encode to base64 (Ollama expects raw base64, not data URL)
         let base64_data = general_purpose::STANDARD.encode(&image_bytes);
-        let mime_type = self.get_mime_type(path)?;
 
-        Ok(format!("data:{mime_type};base64,{base64_data}"))
+        Ok(base64_data)
     }
 
     fn validate_image_format<P: AsRef<Path>>(&self, path: P, bytes: &[u8]) -> Result<(), LlmError> {
@@ -248,20 +236,41 @@ impl LlmClient {
             model: self.model_name.clone(),
             messages: vec![Message {
                 role: "user".to_string(),
-                content: vec![
-                    ContentItem::Text {
-                        text: prompt.to_string(),
-                    },
-                    ContentItem::ImageUrl {
-                        image_url: ImageUrl {
-                            url: image_data.to_string(),
-                        },
-                    },
-                ],
+                content: prompt.to_string(),
+                images: Some(vec![image_data.to_string()]),
             }],
-            max_tokens: Some(500),
-            temperature: Some(0.1), // Low temperature for consistent responses
+            stream: false,
+            options: Options {
+                temperature: 0.1,
+                num_predict: 500,
+            },
         };
+
+        // Debug logging: print request URL and payload
+        println!("=== OLLAMA REQUEST DEBUG ===");
+        println!("URL: {}", self.api_url);
+        println!("Headers: Content-Type: application/json");
+        println!("Request payload:");
+        
+        // Create a debug version of the request with image data replaced
+        let debug_request = ChatCompletionRequest {
+            model: request.model.clone(),
+            messages: vec![Message {
+                role: request.messages[0].role.clone(),
+                content: request.messages[0].content.clone(),
+                images: Some(vec!["<image data>".to_string()]),
+            }],
+            stream: request.stream,
+            options: Options {
+                temperature: request.options.temperature,
+                num_predict: request.options.num_predict,
+            },
+        };
+        
+        println!("{}", serde_json::to_string_pretty(&debug_request).unwrap_or_else(|_| "Failed to serialize request".to_string()));
+        println!("Image data length: {} chars", image_data.len());
+        println!("Image data preview (first 100 chars): {}", &image_data[..image_data.len().min(100)]);
+        println!("============================");
 
         debug!("Sending request to LLM API: {}", self.api_url);
 
@@ -270,21 +279,32 @@ impl LlmClient {
             .post(&self.api_url)
             .json(&request)
             .send()
-            .await?;
+            .await;
+
+        match &response {
+            Ok(resp) => println!("✅ HTTP request successful, status: {}", resp.status()),
+            Err(e) => {
+                println!("❌ HTTP request failed: {}", e);
+                if let Some(source) = StdError::source(e) {
+                    println!("   Source error: {}", source);
+                }
+            }
+        }
+
+        let response = response?;
 
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
+            println!("❌ HTTP error response:");
+            println!("   Status: {}", status);
+            println!("   Body: {}", error_text);
             return Err(LlmError::Api(format!("HTTP {status}: {error_text}")));
         }
 
         let completion: ChatCompletionResponse = response.json().await?;
 
-        if completion.choices.is_empty() {
-            return Err(LlmError::Api("No choices in response".into()));
-        }
-
-        Ok(completion.choices[0].message.content.trim().to_string())
+        Ok(completion.message.content.trim().to_string())
     }
 }
 
