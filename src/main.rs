@@ -32,9 +32,10 @@ async fn main() {
     let config = match Config::from_env() {
         Ok(config) => {
             info!("Configuration loaded successfully");
-            info!("Image base directory: {}", config.image_base_dir);
-            info!("LLM API URL: {}", config.llm_api_url);
-            info!("Queue size: {}", config.queue_size);
+            info!("  +- Image base directory: {}", config.image_base_dir);
+            info!("  +---------- LLM API URL: {}", config.llm_api_url);
+            info!("  +------------ LLM MODEL: {}", config.llm_model_name);
+            info!("  +------------Queue size: {}", config.queue_size);
             config
         }
         Err(e) => {
