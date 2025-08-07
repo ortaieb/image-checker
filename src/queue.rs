@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::models::{ProcessingStatus, ValidationRequest, ValidationResponse};
+use crate::models::{ProcessingRequest, ProcessingStatus, ValidationResponse};
 use crate::validation::ValidationProcessor;
 
 use std::collections::HashMap;
@@ -11,7 +11,7 @@ use tracing::{debug, error, info, warn};
 
 #[derive(Debug)]
 pub enum QueueItem {
-    ValidationRequest(ValidationRequest),
+    ValidationRequest(ProcessingRequest),
     StatusQuery(String, tokio::sync::oneshot::Sender<ProcessingStatus>),
     ResultQuery(
         String,
@@ -107,7 +107,7 @@ impl ProcessingQueue {
         queue
     }
 
-    pub async fn submit_validation(&self, request: ValidationRequest) -> Result<(), QueueError> {
+    pub async fn submit_validation(&self, request: ProcessingRequest) -> Result<(), QueueError> {
         // Check if queue is full
         if self.sender.is_closed() {
             return Err(QueueError::QueueClosed);
@@ -187,7 +187,7 @@ impl ProcessingQueue {
     }
 
     async fn process_validation_request(
-        request: ValidationRequest,
+        request: ProcessingRequest,
         processor: &ValidationProcessor,
         config: &Config,
         status_map: &Arc<RwLock<HashMap<String, ProcessingRecord>>>,
