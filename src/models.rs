@@ -3,9 +3,6 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct ValidationRequest {
-    #[serde(rename = "processing-id")]
-    pub processing_id: String,
-
     #[serde(rename = "image-path")]
     pub image_path: Option<String>,
 
@@ -16,6 +13,31 @@ pub struct ValidationRequest {
 }
 
 impl ValidationRequest {
+    pub fn get_image_path(&self) -> Option<String> {
+        self.image_path.clone().or_else(|| self.image.clone())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ProcessingRequest {
+    pub processing_id: String,
+    pub image_path: Option<String>,
+    pub image: Option<String>,
+    pub analysis_request: AnalysisRequest,
+}
+
+impl ProcessingRequest {
+    pub fn from_request(request: ValidationRequest) -> Self {
+        use uuid::Uuid;
+
+        Self {
+            processing_id: Uuid::new_v4().to_string(),
+            image_path: request.image_path,
+            image: request.image,
+            analysis_request: request.analysis_request,
+        }
+    }
+
     pub fn get_image_path(&self) -> Option<String> {
         self.image_path.clone().or_else(|| self.image.clone())
     }
@@ -324,7 +346,6 @@ mod tests {
     fn test_validation_request_image_path() {
         // Test request with image-path
         let json = r#"{
-            "processing-id": "001",
             "image-path": "/path/to/image.jpg",
             "analysis-request": {
                 "content": "test content"
@@ -342,7 +363,6 @@ mod tests {
     fn test_validation_request_image_null() {
         // Test request with image: null
         let json = r#"{
-            "processing-id": "001", 
             "image": null,
             "analysis-request": {
                 "content": "test content"

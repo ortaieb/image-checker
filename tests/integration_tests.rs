@@ -42,7 +42,6 @@ async fn test_submit_validation_endpoint() {
     let app = create_test_app();
 
     let request_body = json!({
-        "processing-id": "test001",
         "image-path": "/tmp/test.jpg",
         "analysis-request": {
             "content": "Three birds on a wire"
@@ -68,7 +67,9 @@ async fn test_submit_validation_endpoint() {
         .unwrap();
     let response_json: serde_json::Value = serde_json::from_slice(&body).unwrap();
 
-    assert_eq!(response_json["processing-id"], "test001");
+    // Check that processing-id is generated and not empty
+    assert!(response_json["processing-id"].is_string());
+    assert!(!response_json["processing-id"].as_str().unwrap().is_empty());
     assert_eq!(response_json["status"], "accepted");
 }
 
@@ -76,33 +77,8 @@ async fn test_submit_validation_endpoint() {
 async fn test_submit_validation_missing_fields() {
     let app = create_test_app();
 
-    // Test missing processing-id
-    let request_body = json!({
-        "processing-id": "",
-        "image-path": "/tmp/test.jpg",
-        "analysis-request": {
-            "content": "test"
-        }
-    });
-
-    let response = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/validate")
-                .header("content-type", "application/json")
-                .body(Body::from(request_body.to_string()))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-
     // Test missing content
     let request_body = json!({
-        "processing-id": "test002",
         "image-path": "/tmp/test.jpg",
         "analysis-request": {
             "content": ""
@@ -110,6 +86,7 @@ async fn test_submit_validation_missing_fields() {
     });
 
     let response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -130,14 +107,13 @@ async fn test_status_endpoint() {
 
     // Submit a request first
     let request_body = json!({
-        "processing-id": "test003",
         "image-path": "/tmp/test.jpg",
         "analysis-request": {
             "content": "test content"
         }
     });
 
-    let _submit_response = app
+    let submit_response = app
         .clone()
         .oneshot(
             Request::builder()
@@ -150,6 +126,13 @@ async fn test_status_endpoint() {
         .await
         .unwrap();
 
+    // Extract processing-id from submit response
+    let submit_body = axum::body::to_bytes(submit_response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let submit_json: serde_json::Value = serde_json::from_slice(&submit_body).unwrap();
+    let processing_id = submit_json["processing-id"].as_str().unwrap();
+
     // Check status
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
@@ -157,7 +140,7 @@ async fn test_status_endpoint() {
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/status/test003")
+                .uri(&format!("/status/{}", processing_id))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -171,7 +154,7 @@ async fn test_status_endpoint() {
         .unwrap();
     let response_json: serde_json::Value = serde_json::from_slice(&body).unwrap();
 
-    assert_eq!(response_json["processing-id"], "test003");
+    assert_eq!(response_json["processing-id"], processing_id);
     assert!(["accepted", "in_progress", "completed", "failed"]
         .contains(&response_json["status"].as_str().unwrap()));
 }
@@ -273,7 +256,6 @@ async fn test_validation_request_with_location_and_datetime() {
     let app = create_test_app();
 
     let request_body = json!({
-        "processing-id": "test004",
         "image-path": "/tmp/test.jpg",
         "analysis-request": {
             "content": "Pub sign The Ale and Hops",
@@ -308,7 +290,9 @@ async fn test_validation_request_with_location_and_datetime() {
         .unwrap();
     let response_json: serde_json::Value = serde_json::from_slice(&body).unwrap();
 
-    assert_eq!(response_json["processing-id"], "test004");
+    // Check that processing-id is generated and not empty
+    assert!(response_json["processing-id"].is_string());
+    assert!(!response_json["processing-id"].as_str().unwrap().is_empty());
     assert_eq!(response_json["status"], "accepted");
 }
 
@@ -317,7 +301,6 @@ async fn test_validation_request_with_null_image() {
     let app = create_test_app();
 
     let request_body = json!({
-        "processing-id": "test005",
         "image": null,
         "analysis-request": {
             "content": "test content"

@@ -1,4 +1,6 @@
-use crate::models::{ProcessingStatus, StatusResponse, ValidationRequest, ValidationResponse};
+use crate::models::{
+    ProcessingRequest, ProcessingStatus, StatusResponse, ValidationRequest, ValidationResponse,
+};
 use crate::queue::{ProcessingQueue, QueueError, QueueStats};
 
 use axum::{
@@ -53,18 +55,15 @@ pub async fn submit_validation(
     State(queue): State<ProcessingQueue>,
     JsonExtractor(request): JsonExtractor<ValidationRequest>,
 ) -> Result<(StatusCode, Json<SubmitResponse>), (StatusCode, Json<ApiResponse<()>>)> {
-    debug!("Received validation request: {}", request.processing_id);
+    // Generate processing request with auto-generated ID
+    let processing_request = ProcessingRequest::from_request(request);
 
-    // Validate request has required fields
-    if request.processing_id.is_empty() {
-        warn!("Validation request missing processing-id");
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(ApiResponse::error("processing-id is required".to_string())),
-        ));
-    }
+    debug!(
+        "Received validation request, assigned ID: {}",
+        processing_request.processing_id
+    );
 
-    if request.analysis_request.content.is_empty() {
+    if processing_request.analysis_request.content.is_empty() {
         warn!("Validation request missing content description");
         return Err((
             StatusCode::BAD_REQUEST,
@@ -75,7 +74,7 @@ pub async fn submit_validation(
     }
 
     // Check if image path is provided
-    if request.get_image_path().is_none() {
+    if processing_request.get_image_path().is_none() {
         warn!("Validation request missing image path");
         return Err((
             StatusCode::BAD_REQUEST,
@@ -84,16 +83,16 @@ pub async fn submit_validation(
     }
 
     // Submit to processing queue
-    match queue.submit_validation(request.clone()).await {
+    match queue.submit_validation(processing_request.clone()).await {
         Ok(()) => {
             debug!(
                 "Successfully queued validation request: {}",
-                request.processing_id
+                processing_request.processing_id
             );
             Ok((
                 StatusCode::ACCEPTED,
                 Json(SubmitResponse {
-                    processing_id: request.processing_id,
+                    processing_id: processing_request.processing_id,
                     status: "accepted".to_string(),
                 }),
             ))
@@ -101,7 +100,7 @@ pub async fn submit_validation(
         Err(QueueError::QueueFull) => {
             warn!(
                 "Queue is full, rejecting request: {}",
-                request.processing_id
+                processing_request.processing_id
             );
             Err((
                 StatusCode::TOO_MANY_REQUESTS,
@@ -113,7 +112,7 @@ pub async fn submit_validation(
         Err(QueueError::QueueClosed) => {
             error!(
                 "Queue is closed, rejecting request: {}",
-                request.processing_id
+                processing_request.processing_id
             );
             Err((
                 StatusCode::SERVICE_UNAVAILABLE,
@@ -121,7 +120,10 @@ pub async fn submit_validation(
             ))
         }
         Err(e) => {
-            error!("Queue error for request {}: {}", request.processing_id, e);
+            error!(
+                "Queue error for request {}: {}",
+                processing_request.processing_id, e
+            );
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ApiResponse::error("internal server error".to_string())),
@@ -263,7 +265,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_submit_validation_missing_processing_id() {
+    async fn test_submit_validation_missing_content() {
         let config = create_test_config();
         let queue = ProcessingQueue::new(&config);
 
@@ -272,10 +274,9 @@ mod tests {
             .with_state(queue);
 
         let request_body = serde_json::json!({
-            "processing-id": "",
             "image-path": "/tmp/test.jpg",
             "analysis-request": {
-                "content": "test content"
+                "content": ""
             }
         });
 
@@ -304,7 +305,6 @@ mod tests {
             .with_state(queue);
 
         let request_body = serde_json::json!({
-            "processing-id": "test001",
             "image-path": "/tmp/test.jpg",
             "analysis-request": {
                 "content": "test content"

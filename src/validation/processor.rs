@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::models::{Resolution, ValidationContext, ValidationRequest, ValidationResults};
+use crate::models::{ProcessingRequest, Resolution, ValidationContext, ValidationResults};
 use crate::utils::{coords_to_string, format_distance, validate_datetime, validate_location};
 use crate::validation::exif::{extract_exif_metadata, ExifError};
 use crate::validation::llm::{validate_image_content, LlmClient, LlmError};
@@ -46,7 +46,7 @@ impl ValidationProcessor {
 
     pub async fn validate_request(
         &self,
-        request: ValidationRequest,
+        request: ProcessingRequest,
     ) -> Result<ValidationResults, ProcessorError> {
         info!("Starting validation for request: {}", request.processing_id);
 
@@ -104,7 +104,7 @@ impl ValidationProcessor {
         }
     }
 
-    fn resolve_image_path(&self, request: &ValidationRequest) -> Result<String, ProcessorError> {
+    fn resolve_image_path(&self, request: &ProcessingRequest) -> Result<String, ProcessorError> {
         let image_path = request
             .get_image_path()
             .ok_or_else(|| ProcessorError::ImageNotFound("no image path provided".to_string()))?;
@@ -304,7 +304,7 @@ mod tests {
         let processor = ValidationProcessor::new(&config);
 
         // Test absolute path
-        let request = ValidationRequest {
+        let request = ProcessingRequest {
             processing_id: "test".to_string(),
             image_path: Some("/absolute/path/image.jpg".to_string()),
             image: None,
@@ -320,7 +320,7 @@ mod tests {
         assert_eq!(resolved, "/absolute/path/image.jpg");
 
         // Test relative path with $image_base_dir
-        let request = ValidationRequest {
+        let request = ProcessingRequest {
             processing_id: "test".to_string(),
             image_path: Some("$image_base_dir/image.jpg".to_string()),
             image: None,
