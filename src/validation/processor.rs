@@ -231,26 +231,26 @@ impl ValidationProcessor {
                     match validate_datetime(&timestamp, datetime_constraint) {
                         Ok(valid) => {
                             if !valid {
-                                let time_diff = if timestamp < datetime_constraint.reference_time {
+                                let time_diff = if timestamp < datetime_constraint.start_time {
                                     format!(
-                                        "{} minutes before",
-                                        (datetime_constraint.reference_time - timestamp)
-                                            .num_minutes()
+                                        "{} minutes before allowed start time",
+                                        (datetime_constraint.start_time - timestamp).num_minutes()
                                     )
                                 } else {
                                     format!(
-                                        "{} minutes after",
-                                        (timestamp - datetime_constraint.reference_time)
-                                            .num_minutes()
+                                        "{} minutes after allowed end time",
+                                        (timestamp - datetime_constraint.end_time).num_minutes()
                                     )
                                 };
 
                                 reasons.push(format!(
-                                    "image timestamp {} is {} reference time {}, outside {} minute window",
+                                    "image timestamp {} is {}, outside allowed time range {} to {}",
                                     timestamp.format("%Y-%m-%d %H:%M:%S %z"),
                                     time_diff,
-                                    datetime_constraint.reference_time.format("%Y-%m-%d %H:%M:%S %z"),
-                                    datetime_constraint.max_minutes_after
+                                    datetime_constraint
+                                        .start_time
+                                        .format("%Y-%m-%d %H:%M:%S %z"),
+                                    datetime_constraint.end_time.format("%Y-%m-%d %H:%M:%S %z")
                                 ));
                             }
                             valid
@@ -282,7 +282,7 @@ impl ValidationProcessor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{AnalysisRequest, LocationRequest};
+    use crate::models::{AnalysisRequest, DateTimeRequest, LocationRequest};
 
     fn create_test_config() -> Config {
         Config {
@@ -346,9 +346,11 @@ mod tests {
                 lat: 51.492191,
                 max_distance: 100.0,
             }),
-            datetime: Some(
-                "image was taken not more than 10 minutes after 2025-08-01T15:23:00Z+1".to_string(),
-            ),
+            datetime: Some(DateTimeRequest {
+                start: Some("2025-08-01T15:23:00+01:00".to_string()),
+                end: None,
+                duration: Some(10), // 10 minutes
+            }),
         };
 
         let context = ValidationContext::try_from(analysis_request).unwrap();
@@ -363,7 +365,14 @@ mod tests {
         assert!((location.longitude + 0.266108).abs() < 0.000001);
 
         let datetime = context.datetime_constraint.unwrap();
-        assert_eq!(datetime.max_minutes_after, 10);
+        assert_eq!(
+            datetime.start_time.format("%Y-%m-%d %H:%M").to_string(),
+            "2025-08-01 15:23"
+        );
+        assert_eq!(
+            datetime.end_time.format("%Y-%m-%d %H:%M").to_string(),
+            "2025-08-01 15:33"
+        );
     }
 
     // Integration tests with real image files and LLM API should be in tests/ directory

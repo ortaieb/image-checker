@@ -1,5 +1,5 @@
 use crate::models::{DateTimeConstraint, LocationConstraint};
-use chrono::{DateTime, Duration, FixedOffset};
+use chrono::{DateTime, FixedOffset};
 
 const EARTH_RADIUS_KM: f64 = 6371.0;
 const EARTH_RADIUS_M: f64 = EARTH_RADIUS_KM * 1000.0;
@@ -55,12 +55,8 @@ pub fn validate_datetime(
     actual_time: &DateTime<FixedOffset>,
     constraint: &DateTimeConstraint,
 ) -> Result<bool, String> {
-    // Calculate the maximum allowed time (reference + max_minutes_after)
-    let max_allowed_time =
-        constraint.reference_time + Duration::minutes(constraint.max_minutes_after as i64);
-
-    // Check if actual time is between reference time and max allowed time
-    let is_valid = actual_time >= &constraint.reference_time && actual_time <= &max_allowed_time;
+    // Check if actual time is within the allowed time range
+    let is_valid = actual_time >= &constraint.start_time && actual_time <= &constraint.end_time;
 
     Ok(is_valid)
 }
@@ -88,9 +84,7 @@ pub fn validate_coordinates(coords: (f64, f64)) -> Result<(), String> {
     let (lat, lon) = coords;
 
     if !(-90.0..=90.0).contains(&lat) {
-        return Err(format!(
-            "Latitude {lat} is out of valid range (-90 to 90)"
-        ));
+        return Err(format!("Latitude {lat} is out of valid range (-90 to 90)"));
     }
 
     if !(-180.0..=180.0).contains(&lon) {
@@ -202,42 +196,50 @@ mod tests {
 
     #[test]
     fn test_validate_datetime_within_window() {
-        let reference_time = FixedOffset::east_opt(0)
+        let start_time = FixedOffset::east_opt(0)
             .unwrap()
             .with_ymd_and_hms(2025, 8, 1, 15, 23, 0)
             .unwrap();
+        let end_time = FixedOffset::east_opt(0)
+            .unwrap()
+            .with_ymd_and_hms(2025, 8, 1, 15, 33, 0)
+            .unwrap(); // 10 minutes later
         let actual_time = FixedOffset::east_opt(0)
             .unwrap()
             .with_ymd_and_hms(2025, 8, 1, 15, 25, 0)
-            .unwrap(); // 2 minutes later
+            .unwrap(); // 2 minutes after start
 
         let constraint = DateTimeConstraint {
-            max_minutes_after: 10,
-            reference_time,
+            start_time,
+            end_time,
         };
 
         let result = validate_datetime(&actual_time, &constraint).unwrap();
-        assert!(result); // Should be within 10-minute window
+        assert!(result); // Should be within time window
     }
 
     #[test]
     fn test_validate_datetime_outside_window() {
-        let reference_time = FixedOffset::east_opt(0)
+        let start_time = FixedOffset::east_opt(0)
             .unwrap()
             .with_ymd_and_hms(2025, 8, 1, 15, 23, 0)
             .unwrap();
+        let end_time = FixedOffset::east_opt(0)
+            .unwrap()
+            .with_ymd_and_hms(2025, 8, 1, 15, 33, 0)
+            .unwrap(); // 10 minutes later
         let actual_time = FixedOffset::east_opt(0)
             .unwrap()
             .with_ymd_and_hms(2025, 8, 1, 15, 40, 0)
-            .unwrap(); // 17 minutes later
+            .unwrap(); // 17 minutes after start, 7 minutes after end
 
         let constraint = DateTimeConstraint {
-            max_minutes_after: 10,
-            reference_time,
+            start_time,
+            end_time,
         };
 
         let result = validate_datetime(&actual_time, &constraint).unwrap();
-        assert!(!result); // Should be outside 10-minute window
+        assert!(!result); // Should be outside time window
     }
 
     #[test]

@@ -1,9 +1,8 @@
 use image_checker::models::*;
 use image_checker::utils::*;
-use image_checker::validation::llm::{LlmClient, validate_image_content};
+use image_checker::validation::llm::{validate_image_content, LlmClient};
 
 use chrono::{FixedOffset, TimeZone};
-use std::str::FromStr;
 use std::time::Duration;
 
 #[test]
@@ -30,7 +29,7 @@ fn test_location_constraint_from_request() {
         lat: 51.492191,
         max_distance: 100.0,
     };
-    
+
     let constraint = LocationConstraint::from(location_request);
 
     assert_eq!(constraint.max_distance_meters, 100.0);
@@ -42,9 +41,21 @@ fn test_location_constraint_from_request() {
 fn test_location_request_variations() {
     // Test different valid location requests
     let variations = vec![
-        LocationRequest { long: 0.0, lat: 0.0, max_distance: 50.0 },
-        LocationRequest { long: -180.0, lat: -90.0, max_distance: 1000.0 },
-        LocationRequest { long: 180.0, lat: 90.0, max_distance: 25.0 },
+        LocationRequest {
+            long: 0.0,
+            lat: 0.0,
+            max_distance: 50.0,
+        },
+        LocationRequest {
+            long: -180.0,
+            lat: -90.0,
+            max_distance: 1000.0,
+        },
+        LocationRequest {
+            long: 180.0,
+            lat: 90.0,
+            max_distance: 25.0,
+        },
     ];
 
     for location_request in variations {
@@ -56,28 +67,48 @@ fn test_location_request_variations() {
 }
 
 #[test]
-fn test_datetime_constraint_parsing() {
-    let datetime_str = "image was taken not more than 10 minutes after 2025-08-01T15:23:00Z+1";
-    let constraint = DateTimeConstraint::from_str(datetime_str).unwrap();
+fn test_datetime_request_start_and_duration() {
+    let datetime_request = DateTimeRequest {
+        start: Some("2025-08-01T15:23:00+01:00".to_string()),
+        end: None,
+        duration: Some(10),
+    };
 
-    assert_eq!(constraint.max_minutes_after, 10);
+    let constraint = DateTimeConstraint::try_from(datetime_request).unwrap();
+
     assert_eq!(
-        constraint.reference_time.format("%Y-%m-%d").to_string(),
-        "2025-08-01"
+        constraint.start_time.format("%Y-%m-%d %H:%M").to_string(),
+        "2025-08-01 15:23"
+    );
+    assert_eq!(
+        constraint.end_time.format("%Y-%m-%d %H:%M").to_string(),
+        "2025-08-01 15:33"
     );
 }
 
 #[test]
-fn test_datetime_constraint_parsing_variations() {
+fn test_datetime_request_variations() {
     let variations = vec![
-        "image was taken not more than 5 minutes after 2025-08-01T15:23:00Z+1",
-        "image was taken not more than 60 minutes after 2025-12-31T23:59:59Z+1",
-        "image was taken not more than 1 minutes after 2025-01-01T00:00:00Z+1",
+        DateTimeRequest {
+            start: Some("2025-08-01T15:23:00+01:00".to_string()),
+            end: Some("2025-08-01T15:28:00+01:00".to_string()),
+            duration: None,
+        },
+        DateTimeRequest {
+            start: Some("2025-12-31T23:59:00+01:00".to_string()),
+            end: None,
+            duration: Some(60),
+        },
+        DateTimeRequest {
+            start: None,
+            end: Some("2025-01-01T00:01:00+01:00".to_string()),
+            duration: Some(1),
+        },
     ];
 
-    for datetime_str in variations {
-        let result = DateTimeConstraint::from_str(datetime_str);
-        assert!(result.is_ok(), "Failed to parse: {}", datetime_str);
+    for datetime_request in variations {
+        let result = DateTimeConstraint::try_from(datetime_request);
+        assert!(result.is_ok(), "Failed to convert datetime request");
     }
 }
 
@@ -134,18 +165,22 @@ fn test_validate_location_invalid_coordinates() {
 
 #[test]
 fn test_validate_datetime_within_window() {
-    let reference_time = FixedOffset::east_opt(3600)
+    let start_time = FixedOffset::east_opt(3600)
         .unwrap() // +1 hour
         .with_ymd_and_hms(2025, 8, 1, 15, 23, 0)
         .unwrap();
+    let end_time = FixedOffset::east_opt(3600)
+        .unwrap()
+        .with_ymd_and_hms(2025, 8, 1, 15, 33, 0)
+        .unwrap(); // 10 minutes later
     let actual_time = FixedOffset::east_opt(3600)
         .unwrap()
         .with_ymd_and_hms(2025, 8, 1, 15, 25, 0)
-        .unwrap(); // 2 minutes later
+        .unwrap(); // 2 minutes after start
 
     let constraint = DateTimeConstraint {
-        max_minutes_after: 10,
-        reference_time,
+        start_time,
+        end_time,
     };
 
     let result = validate_datetime(&actual_time, &constraint).unwrap();
@@ -154,18 +189,22 @@ fn test_validate_datetime_within_window() {
 
 #[test]
 fn test_validate_datetime_outside_window() {
-    let reference_time = FixedOffset::east_opt(3600)
+    let start_time = FixedOffset::east_opt(3600)
         .unwrap()
         .with_ymd_and_hms(2025, 8, 1, 15, 23, 0)
         .unwrap();
+    let end_time = FixedOffset::east_opt(3600)
+        .unwrap()
+        .with_ymd_and_hms(2025, 8, 1, 15, 33, 0)
+        .unwrap(); // 10 minutes later
     let actual_time = FixedOffset::east_opt(3600)
         .unwrap()
         .with_ymd_and_hms(2025, 8, 1, 15, 40, 0)
-        .unwrap(); // 17 minutes later
+        .unwrap(); // 17 minutes after start, 7 minutes after end
 
     let constraint = DateTimeConstraint {
-        max_minutes_after: 10,
-        reference_time,
+        start_time,
+        end_time,
     };
 
     let result = validate_datetime(&actual_time, &constraint).unwrap();
@@ -173,23 +212,27 @@ fn test_validate_datetime_outside_window() {
 }
 
 #[test]
-fn test_validate_datetime_before_reference() {
-    let reference_time = FixedOffset::east_opt(3600)
+fn test_validate_datetime_before_window() {
+    let start_time = FixedOffset::east_opt(3600)
         .unwrap()
         .with_ymd_and_hms(2025, 8, 1, 15, 23, 0)
         .unwrap();
+    let end_time = FixedOffset::east_opt(3600)
+        .unwrap()
+        .with_ymd_and_hms(2025, 8, 1, 15, 33, 0)
+        .unwrap(); // 10 minutes later
     let actual_time = FixedOffset::east_opt(3600)
         .unwrap()
         .with_ymd_and_hms(2025, 8, 1, 15, 20, 0)
-        .unwrap(); // 3 minutes before
+        .unwrap(); // 3 minutes before start
 
     let constraint = DateTimeConstraint {
-        max_minutes_after: 10,
-        reference_time,
+        start_time,
+        end_time,
     };
 
     let result = validate_datetime(&actual_time, &constraint).unwrap();
-    assert!(!result); // Should fail because it's before reference time
+    assert!(!result); // Should fail because it's before start time
 }
 
 #[test]
@@ -262,9 +305,11 @@ fn test_validation_context_creation() {
             lat: 51.492191,
             max_distance: 100.0,
         }),
-        datetime: Some(
-            "image was taken not more than 10 minutes after 2025-08-01T15:23:00Z+1".to_string(),
-        ),
+        datetime: Some(DateTimeRequest {
+            start: Some("2025-08-01T15:23:00+01:00".to_string()),
+            end: None,
+            duration: Some(10), // 10 minutes
+        }),
     };
 
     let context = ValidationContext::try_from(analysis_request).unwrap();
@@ -279,7 +324,14 @@ fn test_validation_context_creation() {
     assert!((location.longitude + 0.266108).abs() < 0.000001);
 
     let datetime = context.datetime_constraint.unwrap();
-    assert_eq!(datetime.max_minutes_after, 10);
+    assert_eq!(
+        datetime.start_time.format("%Y-%m-%d %H:%M").to_string(),
+        "2025-08-01 15:23"
+    );
+    assert_eq!(
+        datetime.end_time.format("%Y-%m-%d %H:%M").to_string(),
+        "2025-08-01 15:33"
+    );
 }
 
 #[test]
@@ -302,7 +354,7 @@ fn test_validation_context_optional_fields() {
 async fn test_llm_validation_integration() {
     // This test requires Ollama to be running with the llava:13b model
     // Skip if not available
-    
+
     let client = LlmClient::new(
         "http://localhost:11434/api/chat".to_string(),
         "llava:13b".to_string(),
@@ -317,7 +369,10 @@ async fn test_llm_validation_integration() {
     match validate_image_content(&client, image_path, content_description).await {
         Ok(is_valid) => {
             println!("✅ LLM validation completed successfully");
-            println!("   Result: {}", if is_valid { "ACCEPTED" } else { "REJECTED" });
+            println!(
+                "   Result: {}",
+                if is_valid { "ACCEPTED" } else { "REJECTED" }
+            );
         }
         Err(e) => {
             println!("❌ LLM validation failed: {}", e);

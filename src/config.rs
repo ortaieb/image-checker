@@ -50,6 +50,13 @@ impl Config {
         Ok(config)
     }
 
+    #[cfg(test)]
+    fn from_env_no_dotenv() -> Result<Self, ConfigError> {
+        let config: Config = envy::from_env()?;
+        config.validate()?;
+        Ok(config)
+    }
+
     fn validate(&self) -> Result<(), ConfigError> {
         // Validate image base directory exists or can be created
         if !Path::new(&self.image_base_dir).exists() {
@@ -145,13 +152,15 @@ mod tests {
         env::remove_var("REQUEST_TIMEOUT_SECONDS");
         env::remove_var("PROCESSING_TIMEOUT_MINUTES");
         env::remove_var("THROTTLE_REQUESTS_PER_MINUTE");
-        
+        env::remove_var("IMAGE_BASE_DIR");
+        env::remove_var("LLM_API_URL");
+
         // Set minimal required env vars
         env::set_var("IMAGE_BASE_DIR", "/tmp");
         env::set_var("LLM_API_URL", "http://localhost:8080");
         env::set_var("QUEUE_SIZE", "100");
 
-        let config = Config::from_env().expect("Failed to load config with defaults");
+        let config = Config::from_env_no_dotenv().expect("Failed to load config with defaults");
 
         assert_eq!(config.host, "127.0.0.1");
         assert_eq!(config.port, 3000);
@@ -164,20 +173,20 @@ mod tests {
 
     #[test]
     fn test_config_validation_invalid_url() {
-        // Clear any existing env vars that might interfere
-        env::remove_var("QUEUE_SIZE");
-        env::remove_var("HOST");
-        env::remove_var("PORT");
-        env::remove_var("LLM_MODEL_NAME");
-        env::remove_var("REQUEST_TIMEOUT_SECONDS");
-        env::remove_var("PROCESSING_TIMEOUT_MINUTES");
-        env::remove_var("THROTTLE_REQUESTS_PER_MINUTE");
-        
-        env::set_var("IMAGE_BASE_DIR", "/tmp");
-        env::set_var("LLM_API_URL", "invalid-url");
-        env::set_var("QUEUE_SIZE", "100");
+        // Manually create config with invalid URL to avoid env conflicts
+        let config = Config {
+            host: "127.0.0.1".to_string(),
+            port: 3000,
+            image_base_dir: "/tmp".to_string(),
+            llm_api_url: "invalid-url".to_string(), // This should cause validation to fail
+            llm_model_name: "llava:7b".to_string(),
+            request_timeout_seconds: 30,
+            processing_timeout_minutes: 5,
+            queue_size: 100,
+            throttle_requests_per_minute: 60,
+        };
 
-        let result = Config::from_env();
+        let result = config.validate();
         assert!(result.is_err());
         let error_msg = result.unwrap_err().to_string();
         assert!(error_msg.contains("must start with http:// or https://"));
@@ -185,16 +194,42 @@ mod tests {
 
     #[test]
     fn test_config_validation_invalid_queue_size() {
-        env::set_var("IMAGE_BASE_DIR", "/tmp");
-        env::set_var("LLM_API_URL", "http://localhost:8080");
-        env::set_var("QUEUE_SIZE", "0");
+        // Use a different environment variable scope to avoid conflicts
+        let test_env_vars = vec![
+            ("TEST_IMAGE_BASE_DIR", "/tmp"),
+            ("TEST_LLM_API_URL", "http://localhost:8080"),
+            ("TEST_QUEUE_SIZE", "0"),
+        ];
 
-        let result = Config::from_env();
+        // Set test-specific env vars
+        for (key, value) in &test_env_vars {
+            env::set_var(key, value);
+        }
+
+        // Manually create config with test values to avoid env conflicts
+        let config = Config {
+            host: "127.0.0.1".to_string(),
+            port: 3000,
+            image_base_dir: "/tmp".to_string(),
+            llm_api_url: "http://localhost:8080".to_string(),
+            llm_model_name: "llava:7b".to_string(),
+            request_timeout_seconds: 30,
+            processing_timeout_minutes: 5,
+            queue_size: 0, // This should cause validation to fail
+            throttle_requests_per_minute: 60,
+        };
+
+        let result = config.validate();
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
             .to_string()
             .contains("Queue size must be between"));
+
+        // Clean up
+        for (key, _) in &test_env_vars {
+            env::remove_var(key);
+        }
     }
 
     #[test]
@@ -207,12 +242,14 @@ mod tests {
         env::remove_var("REQUEST_TIMEOUT_SECONDS");
         env::remove_var("PROCESSING_TIMEOUT_MINUTES");
         env::remove_var("THROTTLE_REQUESTS_PER_MINUTE");
-        
+        env::remove_var("IMAGE_BASE_DIR");
+        env::remove_var("LLM_API_URL");
+
         env::set_var("IMAGE_BASE_DIR", "/tmp");
         env::set_var("LLM_API_URL", "http://localhost:8080");
         env::set_var("QUEUE_SIZE", "100");
 
-        let config = Config::from_env().expect("Failed to load config");
+        let config = Config::from_env_no_dotenv().expect("Failed to load config");
 
         assert_eq!(config.request_timeout(), Duration::from_secs(30));
         assert_eq!(config.processing_timeout(), Duration::from_secs(300)); // 5 minutes
