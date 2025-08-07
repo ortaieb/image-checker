@@ -115,7 +115,16 @@ impl ValidationProcessor {
             .ok_or_else(|| ProcessorError::ImageNotFound("no image path provided".to_string()))?;
 
         // Handle different path formats
-        if image_path.starts_with('/') {
+        if image_path.contains("://") {
+            // Full URI (e.g., file:///path, s3://bucket/path) - parse and extract local path
+            match crate::storage::StorageUri::parse(&image_path) {
+                Ok(uri) => Ok(uri.to_local_path().to_string()),
+                Err(_) => {
+                    // If URI parsing fails, treat as absolute path for backward compatibility
+                    Ok(image_path)
+                }
+            }
+        } else if image_path.starts_with('/') {
             // Absolute path - return as-is
             Ok(image_path)
         } else if image_path.starts_with("$image_base_dir/") {
@@ -449,6 +458,44 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("no image path provided"));
+    }
+
+    #[test]
+    fn test_resolve_image_path_full_uri_in_request() {
+        let config = create_test_config();
+        let processor = ValidationProcessor::new(&config);
+
+        // Test request with full file:// URI - should extract the path directly
+        let request = ProcessingRequest {
+            processing_id: "test".to_string(),
+            image_path: Some("file:///tmp/image-test/IMG_7910s.jpeg".to_string()),
+            image: None,
+            analysis_request: AnalysisRequest {
+                image_path: None,
+                content: "test".to_string(),
+                location: None,
+                datetime: None,
+            },
+        };
+
+        let resolved = processor.resolve_image_path(&request).unwrap();
+        assert_eq!(resolved, "/tmp/image-test/IMG_7910s.jpeg");
+
+        // Test with unsupported URI scheme - should return as-is for backward compatibility
+        let request = ProcessingRequest {
+            processing_id: "test".to_string(),
+            image_path: Some("http://example.com/image.jpg".to_string()),
+            image: None,
+            analysis_request: AnalysisRequest {
+                image_path: None,
+                content: "test".to_string(),
+                location: None,
+                datetime: None,
+            },
+        };
+
+        let resolved = processor.resolve_image_path(&request).unwrap();
+        assert_eq!(resolved, "http://example.com/image.jpg");
     }
 
     #[test]
