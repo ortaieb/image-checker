@@ -163,30 +163,6 @@ impl LlmClient {
         Ok(())
     }
 
-    fn get_mime_type<P: AsRef<Path>>(&self, path: P) -> Result<String, LlmError> {
-        let extension = path
-            .as_ref()
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .unwrap_or("")
-            .to_lowercase();
-
-        let mime_type = match extension.as_str() {
-            "jpg" | "jpeg" => "image/jpeg",
-            "png" => "image/png",
-            "gif" => "image/gif",
-            "bmp" => "image/bmp",
-            "webp" => "image/webp",
-            _ => {
-                return Err(LlmError::InvalidImage(format!(
-                    "Unknown MIME type for extension: {extension}"
-                )))
-            }
-        };
-
-        Ok(mime_type.to_string())
-    }
-
     fn construct_validation_prompt(&self, content_description: &str) -> String {
         format!(
             "You are an image validation assistant. Please analyze this image and determine if it matches the following description: \"{content_description}\"\n\n\
@@ -251,7 +227,7 @@ impl LlmClient {
         println!("URL: {}", self.api_url);
         println!("Headers: Content-Type: application/json");
         println!("Request payload:");
-        
+
         // Create a debug version of the request with image data replaced
         let debug_request = ChatCompletionRequest {
             model: request.model.clone(),
@@ -266,27 +242,29 @@ impl LlmClient {
                 num_predict: request.options.num_predict,
             },
         };
-        
-        println!("{}", serde_json::to_string_pretty(&debug_request).unwrap_or_else(|_| "Failed to serialize request".to_string()));
+
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&debug_request)
+                .unwrap_or_else(|_| "Failed to serialize request".to_string())
+        );
         println!("Image data length: {} chars", image_data.len());
-        println!("Image data preview (first 100 chars): {}", &image_data[..image_data.len().min(100)]);
+        println!(
+            "Image data preview (first 100 chars): {}",
+            &image_data[..image_data.len().min(100)]
+        );
         println!("============================");
 
         debug!("Sending request to LLM API: {}", self.api_url);
 
-        let response = self
-            .client
-            .post(&self.api_url)
-            .json(&request)
-            .send()
-            .await;
+        let response = self.client.post(&self.api_url).json(&request).send().await;
 
         match &response {
             Ok(resp) => println!("✅ HTTP request successful, status: {}", resp.status()),
             Err(e) => {
-                println!("❌ HTTP request failed: {}", e);
+                println!("❌ HTTP request failed: {e}");
                 if let Some(source) = StdError::source(e) {
-                    println!("   Source error: {}", source);
+                    println!("   Source error: {source}");
                 }
             }
         }
@@ -297,8 +275,8 @@ impl LlmClient {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
             println!("❌ HTTP error response:");
-            println!("   Status: {}", status);
-            println!("   Body: {}", error_text);
+            println!("   Status: {status}");
+            println!("   Body: {error_text}");
             return Err(LlmError::Api(format!("HTTP {status}: {error_text}")));
         }
 
@@ -344,21 +322,6 @@ mod tests {
         assert!(prompt.contains("Three birds on a wire"));
         assert!(prompt.contains("ACCEPTED"));
         assert!(prompt.contains("REJECTED"));
-    }
-
-    #[test]
-    fn test_get_mime_type() {
-        let client = LlmClient::new(
-            "http://localhost:8080".into(),
-            "llava:7b".into(),
-            Duration::from_secs(30),
-        );
-
-        assert_eq!(client.get_mime_type("test.jpg").unwrap(), "image/jpeg");
-        assert_eq!(client.get_mime_type("test.png").unwrap(), "image/png");
-        assert_eq!(client.get_mime_type("test.gif").unwrap(), "image/gif");
-
-        assert!(client.get_mime_type("test.txt").is_err());
     }
 
     #[tokio::test]
