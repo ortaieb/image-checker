@@ -148,3 +148,13 @@
 - **Never hallucinate libraries or functions** – only use known, verified Python packages.
 - **Always confirm file paths and module names** exist before referencing them in code or tests.
 - **Never delete or overwrite existing code** unless explicitly instructed to or if part of a task from `TASK.md`.
+
+## Integrity of code
+Validate all change by executing clean build
+
+### Rust and Cargo
+- Clean the project: `cargo clean`
+- Run fmt check: `cargo fmt --check`
+- Run linting with errors: `cargo clippy -- -D warnings`
+- Run unit-tests: `cargo test --all-features`
+- Run integration-tests
