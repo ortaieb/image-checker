@@ -32,24 +32,38 @@ struct ChatCompletionRequest {
     model: String,
     messages: Vec<Message>,
     stream: bool,
-    options: Options,
+    max_tokens: u32,
+    temperature: f32,
 }
 
 #[derive(Debug, Serialize)]
 struct Message {
     role: String,
-    content: String,
-    images: Option<Vec<String>>,
+    content: Vec<Content>,
 }
 
-#[derive(Debug, Serialize)]
-struct Options {
-    temperature: f32,
-    num_predict: u32,
+#[derive(Debug, Clone, Serialize)]
+struct Content {
+    #[serde(rename = "type")]
+    content_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    image_url: Option<ImageUrl>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ImageUrl {
+    url: String,
 }
 
 #[derive(Debug, Deserialize)]
 struct ChatCompletionResponse {
+    choices: Vec<Choice>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Choice {
     message: ResponseMessage,
 }
 
@@ -116,7 +130,7 @@ impl LlmClient {
         // Validate image format by checking file extension and magic bytes
         self.validate_image_format(path, &image_bytes)?;
 
-        // Encode to base64 (Ollama expects raw base64, not data URL)
+        // Encode to base64 (will be embedded in data URL for /v1/chat/completions)
         let base64_data = general_purpose::STANDARD.encode(&image_bytes);
 
         Ok(base64_data)
@@ -212,14 +226,24 @@ impl LlmClient {
             model: self.model_name.clone(),
             messages: vec![Message {
                 role: "user".to_string(),
-                content: prompt.to_string(),
-                images: Some(vec![image_data.to_string()]),
+                content: vec![
+                    Content {
+                        content_type: "text".to_string(),
+                        text: Some(prompt.to_string()),
+                        image_url: None,
+                    },
+                    Content {
+                        content_type: "image_url".to_string(),
+                        text: None,
+                        image_url: Some(ImageUrl {
+                            url: format!("data:image/jpeg;base64,{image_data}"),
+                        }),
+                    },
+                ],
             }],
             stream: false,
-            options: Options {
-                temperature: 0.1,
-                num_predict: 500,
-            },
+            max_tokens: 500,
+            temperature: 0.1,
         };
 
         // Debug logging: print request URL and payload
@@ -233,14 +257,29 @@ impl LlmClient {
             model: request.model.clone(),
             messages: vec![Message {
                 role: request.messages[0].role.clone(),
-                content: request.messages[0].content.clone(),
-                images: Some(vec!["<image data>".to_string()]),
+                content: request.messages[0]
+                    .content
+                    .iter()
+                    .map(|c| match c.content_type.as_str() {
+                        "text" => Content {
+                            content_type: "text".to_string(),
+                            text: c.text.clone(),
+                            image_url: None,
+                        },
+                        "image_url" => Content {
+                            content_type: "image_url".to_string(),
+                            text: None,
+                            image_url: Some(ImageUrl {
+                                url: "<image data>".to_string(),
+                            }),
+                        },
+                        _ => c.clone(),
+                    })
+                    .collect(),
             }],
             stream: request.stream,
-            options: Options {
-                temperature: request.options.temperature,
-                num_predict: request.options.num_predict,
-            },
+            max_tokens: request.max_tokens,
+            temperature: request.temperature,
         };
 
         println!(
@@ -282,7 +321,13 @@ impl LlmClient {
 
         let completion: ChatCompletionResponse = response.json().await?;
 
-        Ok(completion.message.content.trim().to_string())
+        if completion.choices.is_empty() {
+            return Err(LlmError::Api(
+                "No choices returned from LLM API".to_string(),
+            ));
+        }
+
+        Ok(completion.choices[0].message.content.trim().to_string())
     }
 }
 

@@ -10,7 +10,7 @@ async fn main() {
 
     // Create LLM client
     let client = LlmClient::new(
-        "http://localhost:11434/api/chat".to_string(),
+        "http://localhost:11434/v1/chat/completions".to_string(),
         "llava:13b".to_string(),
         Duration::from_secs(30),
     );

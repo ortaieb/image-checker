@@ -63,7 +63,7 @@ cat > .env << EOF
 HOST=127.0.0.1
 PORT=3000
 IMAGE_BASE_DIR=/tmp/images
-LLM_API_URL=http://localhost:11434
+LLM_API_URL=http://localhost:11434/v1/chat/completions
 LLM_MODEL_NAME=llava:7b
 REQUEST_TIMEOUT_SECONDS=30
 PROCESSING_TIMEOUT_MINUTES=5
@@ -84,7 +84,7 @@ The service uses environment variables for configuration. Create a `.env` file o
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `IMAGE_BASE_DIR` | Directory containing images to validate | `/tmp/images` |
-| `LLM_API_URL` | URL of the LLaVa API endpoint | `http://localhost:11434` |
+| `LLM_API_URL` | URL of the LLaVa API endpoint | `http://localhost:11434/v1/chat/completions` |
 
 ### Optional Configuration
 
@@ -105,7 +105,7 @@ The service uses environment variables for configuration. Create a `.env` file o
 HOST=0.0.0.0
 PORT=8080
 IMAGE_BASE_DIR=/opt/images
-LLM_API_URL=https://llava-api.example.com
+LLM_API_URL=https://llava-api.example.com/v1/chat/completions
 LLM_MODEL_NAME=llava:13b
 REQUEST_TIMEOUT_SECONDS=60
 PROCESSING_TIMEOUT_MINUTES=10
@@ -737,7 +737,7 @@ sudo systemctl status image-checker
 HOST=0.0.0.0
 PORT=8080
 IMAGE_BASE_DIR=/opt/images
-LLM_API_URL=https://api.example.com/llava
+LLM_API_URL=https://api.example.com/v1/chat/completions
 REQUEST_TIMEOUT_SECONDS=60
 PROCESSING_TIMEOUT_MINUTES=10
 QUEUE_SIZE=1000

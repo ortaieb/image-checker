@@ -3,7 +3,7 @@
 
 # Set environment variables
 export IMAGE_BASE_DIR=/tmp/test-images
-export LLM_API_URL=http://localhost:11434/api/chat
+export LLM_API_URL=http://localhost:11434/v1/chat/completions
 export LLM_MODEL_NAME=llava:13b
 export HOST=127.0.0.1
 export PORT=3001
