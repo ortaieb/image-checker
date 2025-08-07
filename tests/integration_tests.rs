@@ -282,7 +282,10 @@ async fn test_validation_request_with_location_and_datetime() {
                 "lat": 51.492191,
                 "max_distance": 100.0
             },
-            "datetime": "image was taken not more than 10 minutes after 2025-08-01T15:23:00Z+1"
+            "datetime": {
+                "start": "2025-08-01T15:23:00+01:00",
+                "duration": 10
+            }
         }
     });
 

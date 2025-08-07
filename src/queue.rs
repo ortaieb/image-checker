@@ -1,7 +1,5 @@
 use crate::config::Config;
-use crate::models::{
-    ProcessingStatus, ValidationRequest, ValidationResponse,
-};
+use crate::models::{ProcessingStatus, ValidationRequest, ValidationResponse};
 use crate::validation::ValidationProcessor;
 
 use std::collections::HashMap;

@@ -140,7 +140,10 @@ Submit an image for validation against specified criteria.
       "lat": 51.492191,
       "max_distance": 100.0
     },
-    "datetime": "image was taken not more than 10 minutes after 2025-08-01T15:23:00Z"
+    "datetime": {
+      "start": "2025-08-01T15:23:00+01:00",
+      "duration": 10
+    }
   }
 }
 ```
@@ -169,6 +172,17 @@ The `location` field is optional but if provided, all three fields are required:
 - `long` (f64): Longitude in decimal degrees (-180.0 to 180.0)
 - `lat` (f64): Latitude in decimal degrees (-90.0 to 90.0)  
 - `max_distance` (f64): Maximum allowed distance from coordinates in meters
+
+**DateTime Constraint Format:**
+The `datetime` field is optional but if provided, exactly two out of three fields are required:
+- `start` (string): Start time in ISO 8601 format (e.g., "2025-08-01T15:23:00+01:00")
+- `end` (string): End time in ISO 8601 format (e.g., "2025-08-01T15:33:00+01:00")
+- `duration` (u64): Duration in minutes
+
+Valid combinations:
+- `start` + `end`: Define explicit time range
+- `start` + `duration`: Start time with duration 
+- `end` + `duration`: End time with duration (calculates start time)
 
 **Status Codes:**
 - `202 Accepted` - Request queued successfully
@@ -308,7 +322,10 @@ curl -X POST http://localhost:3000/validate \
         "lat": 51.492191,
         "max_distance": 100.0
       },
-      "datetime": "image was taken not more than 10 minutes after 2025-08-01T15:23:00Z"
+      "datetime": {
+        "start": "2025-08-01T15:23:00+01:00",
+        "duration": 10
+      }
     }
   }'
 ```
@@ -323,6 +340,55 @@ curl -X POST http://localhost:3000/validate \
     "image": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAYABgAAD...",
     "analysis-request": {
       "content": "A cat sitting on a windowsill"
+    }
+  }'
+```
+
+### DateTime Constraint Examples
+
+```bash
+# Example 1: Start time + Duration (10 minute window from start)
+curl -X POST http://localhost:3000/validate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "processing-id": "datetime-001",
+    "image-path": "photo.jpg",
+    "analysis-request": {
+      "content": "A sunset photo",
+      "datetime": {
+        "start": "2025-08-01T19:30:00+01:00",
+        "duration": 10
+      }
+    }
+  }'
+
+# Example 2: Start time + End time (explicit range)
+curl -X POST http://localhost:3000/validate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "processing-id": "datetime-002", 
+    "image-path": "photo.jpg",
+    "analysis-request": {
+      "content": "A sunset photo",
+      "datetime": {
+        "start": "2025-08-01T19:30:00+01:00",
+        "end": "2025-08-01T19:40:00+01:00"
+      }
+    }
+  }'
+
+# Example 3: End time + Duration (10 minutes before end)
+curl -X POST http://localhost:3000/validate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "processing-id": "datetime-003",
+    "image-path": "photo.jpg", 
+    "analysis-request": {
+      "content": "A sunset photo",
+      "datetime": {
+        "end": "2025-08-01T19:40:00+01:00",
+        "duration": 10
+      }
     }
   }'
 ```
@@ -438,13 +504,19 @@ pub struct ValidationRequest {
 pub struct AnalysisRequest {
     pub content: String,
     pub location: Option<LocationRequest>,
-    pub datetime: Option<String>,
+    pub datetime: Option<DateTimeRequest>,
 }
 
 pub struct LocationRequest {
     pub long: f64,    // longitude
     pub lat: f64,     // latitude  
     pub max_distance: f64,  // maximum distance in meters
+}
+
+pub struct DateTimeRequest {
+    pub start: Option<String>,    // ISO 8601 datetime string
+    pub end: Option<String>,      // ISO 8601 datetime string  
+    pub duration: Option<u64>,    // duration in minutes
 }
 ```
 
@@ -594,7 +666,11 @@ async fn test_validation_with_location_constraint() {
                 lat: 51.492191,
                 max_distance: 50.0,
             }),
-            datetime: None,
+            datetime: Some(DateTimeRequest {
+                start: Some("2025-08-01T15:23:00+01:00".to_string()),
+                end: None,
+                duration: Some(10),
+            }),
         }
     };
     

@@ -1,6 +1,5 @@
 use chrono::{DateTime, FixedOffset};
 use serde::{Deserialize, Serialize};
-use std::str::FromStr;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct ValidationRequest {
@@ -30,6 +29,13 @@ pub struct LocationRequest {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+pub struct DateTimeRequest {
+    pub start: Option<String>,
+    pub end: Option<String>,
+    pub duration: Option<u64>, // duration in minutes
+}
+
+#[derive(Debug, Deserialize, Clone)]
 pub struct AnalysisRequest {
     #[serde(rename = "image-path")]
     pub image_path: Option<String>,
@@ -38,7 +44,7 @@ pub struct AnalysisRequest {
 
     pub location: Option<LocationRequest>,
 
-    pub datetime: Option<String>,
+    pub datetime: Option<DateTimeRequest>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -103,50 +109,80 @@ impl From<LocationRequest> for LocationConstraint {
 
 #[derive(Debug, Clone)]
 pub struct DateTimeConstraint {
-    pub max_minutes_after: u64,
-    pub reference_time: DateTime<FixedOffset>,
+    pub start_time: DateTime<FixedOffset>,
+    pub end_time: DateTime<FixedOffset>,
 }
 
-impl FromStr for DateTimeConstraint {
-    type Err = String;
+impl TryFrom<DateTimeRequest> for DateTimeConstraint {
+    type Error = String;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        // Parse "image was taken not more than 10 minutes after 2025-08-01T15:23:00Z+1"
-        let parts: Vec<&str> = s.split_whitespace().collect();
+    fn try_from(request: DateTimeRequest) -> Result<Self, Self::Error> {
+        use chrono::Duration;
 
-        if parts.len() < 10 {
-            return Err(format!("Invalid datetime format: {s}"));
+        // Validate that we have exactly 2 out of 3 fields
+        let field_count = [
+            request.start.is_some(),
+            request.end.is_some(),
+            request.duration.is_some(),
+        ]
+        .iter()
+        .filter(|&&x| x)
+        .count();
+
+        if field_count != 2 {
+            return Err(
+                "Exactly two out of three fields (start, end, duration) must be provided"
+                    .to_string(),
+            );
         }
 
-        // Extract minutes - should be the number before "minutes"
-        let minutes_str = parts[6];
-        let max_minutes_after = minutes_str
-            .parse::<u64>()
-            .map_err(|_| format!("Invalid minutes: {minutes_str}"))?;
-
-        // Extract datetime - last part should be the timestamp
-        let datetime_str = parts[parts.len() - 1];
-
-        // Handle different datetime formats
-        let reference_time = if datetime_str.contains('+') || datetime_str.contains('Z') {
-            DateTime::parse_from_rfc3339(datetime_str)
+        let parse_datetime = |dt_str: &str| -> Result<DateTime<FixedOffset>, String> {
+            DateTime::parse_from_rfc3339(dt_str)
                 .or_else(|_| {
                     // Try parsing custom format like "2025-08-01T15:23:00Z+1"
-                    if let Some(base_dt) = datetime_str.strip_suffix("Z+1") {
+                    if let Some(base_dt) = dt_str.strip_suffix("Z+1") {
                         let dt_with_tz = format!("{}+01:00", base_dt.trim_end_matches('Z'));
                         DateTime::parse_from_rfc3339(&dt_with_tz)
                     } else {
-                        DateTime::parse_from_rfc3339(datetime_str)
+                        DateTime::parse_from_rfc3339(dt_str)
                     }
                 })
-                .map_err(|_| format!("Invalid datetime: {datetime_str}"))?
-        } else {
-            return Err(format!("Datetime must include timezone: {datetime_str}"));
+                .map_err(|_| format!("Invalid datetime format: {dt_str}"))
+        };
+
+        let (start_time, end_time) = match (request.start, request.end, request.duration) {
+            // Case 1: start + end provided
+            (Some(start_str), Some(end_str), None) => {
+                let start = parse_datetime(&start_str)?;
+                let end = parse_datetime(&end_str)?;
+
+                if end <= start {
+                    return Err("End time must be after start time".to_string());
+                }
+
+                (start, end)
+            }
+
+            // Case 2: start + duration provided
+            (Some(start_str), None, Some(duration_minutes)) => {
+                let start = parse_datetime(&start_str)?;
+                let end = start + Duration::minutes(duration_minutes as i64);
+                (start, end)
+            }
+
+            // Case 3: end + duration provided
+            (None, Some(end_str), Some(duration_minutes)) => {
+                let end = parse_datetime(&end_str)?;
+                let start = end - Duration::minutes(duration_minutes as i64);
+                (start, end)
+            }
+
+            _ => return Err("Invalid combination of fields provided".to_string()),
         };
 
         Ok(DateTimeConstraint {
-            max_minutes_after,
-            reference_time,
+            start_time,
+            end_time,
         })
     }
 }
@@ -165,7 +201,7 @@ impl TryFrom<AnalysisRequest> for ValidationContext {
         let location_constraint = request.location.map(LocationConstraint::from);
 
         let datetime_constraint = if let Some(datetime) = request.datetime {
-            Some(DateTimeConstraint::from_str(&datetime)?)
+            Some(DateTimeConstraint::try_from(datetime)?)
         } else {
             None
         };
@@ -189,7 +225,7 @@ mod tests {
             lat: 51.492191,
             max_distance: 100.0,
         };
-        
+
         let constraint = LocationConstraint::from(location_request);
 
         assert_eq!(constraint.max_distance_meters, 100.0);
@@ -198,16 +234,90 @@ mod tests {
     }
 
     #[test]
-    fn test_datetime_constraint_parsing() {
-        let datetime_str = "image was taken not more than 10 minutes after 2025-08-01T15:23:00Z+1";
-        let constraint = DateTimeConstraint::from_str(datetime_str).unwrap();
+    fn test_datetime_constraint_from_start_and_duration() {
+        let datetime_request = DateTimeRequest {
+            start: Some("2025-08-01T15:23:00+01:00".to_string()),
+            end: None,
+            duration: Some(10), // 10 minutes
+        };
 
-        assert_eq!(constraint.max_minutes_after, 10);
-        // The reference time should be parsed correctly
+        let constraint = DateTimeConstraint::try_from(datetime_request).unwrap();
+
         assert_eq!(
-            constraint.reference_time.format("%Y-%m-%d").to_string(),
-            "2025-08-01"
+            constraint.start_time.format("%Y-%m-%d %H:%M").to_string(),
+            "2025-08-01 15:23"
         );
+        assert_eq!(
+            constraint.end_time.format("%Y-%m-%d %H:%M").to_string(),
+            "2025-08-01 15:33"
+        );
+    }
+
+    #[test]
+    fn test_datetime_constraint_from_start_and_end() {
+        let datetime_request = DateTimeRequest {
+            start: Some("2025-08-01T15:23:00+01:00".to_string()),
+            end: Some("2025-08-01T15:33:00+01:00".to_string()),
+            duration: None,
+        };
+
+        let constraint = DateTimeConstraint::try_from(datetime_request).unwrap();
+
+        assert_eq!(
+            constraint.start_time.format("%Y-%m-%d %H:%M").to_string(),
+            "2025-08-01 15:23"
+        );
+        assert_eq!(
+            constraint.end_time.format("%Y-%m-%d %H:%M").to_string(),
+            "2025-08-01 15:33"
+        );
+    }
+
+    #[test]
+    fn test_datetime_constraint_from_end_and_duration() {
+        let datetime_request = DateTimeRequest {
+            start: None,
+            end: Some("2025-08-01T15:33:00+01:00".to_string()),
+            duration: Some(10), // 10 minutes
+        };
+
+        let constraint = DateTimeConstraint::try_from(datetime_request).unwrap();
+
+        assert_eq!(
+            constraint.start_time.format("%Y-%m-%d %H:%M").to_string(),
+            "2025-08-01 15:23"
+        );
+        assert_eq!(
+            constraint.end_time.format("%Y-%m-%d %H:%M").to_string(),
+            "2025-08-01 15:33"
+        );
+    }
+
+    #[test]
+    fn test_datetime_constraint_invalid_combinations() {
+        // Test with no fields
+        let result = DateTimeConstraint::try_from(DateTimeRequest {
+            start: None,
+            end: None,
+            duration: None,
+        });
+        assert!(result.is_err());
+
+        // Test with all fields
+        let result = DateTimeConstraint::try_from(DateTimeRequest {
+            start: Some("2025-08-01T15:23:00+01:00".to_string()),
+            end: Some("2025-08-01T15:33:00+01:00".to_string()),
+            duration: Some(10),
+        });
+        assert!(result.is_err());
+
+        // Test with only one field
+        let result = DateTimeConstraint::try_from(DateTimeRequest {
+            start: Some("2025-08-01T15:23:00+01:00".to_string()),
+            end: None,
+            duration: None,
+        });
+        assert!(result.is_err());
     }
 
     #[test]
