@@ -1,5 +1,6 @@
 use crate::config::Config;
 use crate::models::{ProcessingRequest, Resolution, ValidationContext, ValidationResults};
+use crate::storage::StorageUri;
 use crate::utils::{coords_to_string, format_distance, validate_datetime, validate_location};
 use crate::validation::exif::{extract_exif_metadata, ExifError};
 use crate::validation::llm::{validate_image_content, LlmClient, LlmError};
@@ -27,7 +28,7 @@ pub enum ProcessorError {
 
 pub struct ValidationProcessor {
     llm_client: LlmClient,
-    image_base_dir: String,
+    storage_uri: StorageUri,
 }
 
 impl ValidationProcessor {
@@ -38,9 +39,13 @@ impl ValidationProcessor {
             config.request_timeout(),
         );
 
+        let storage_uri = config
+            .get_storage_uri()
+            .expect("Invalid storage URI in config");
+
         Self {
             llm_client,
-            image_base_dir: config.image_base_dir.clone(),
+            storage_uri,
         }
     }
 
@@ -109,14 +114,17 @@ impl ValidationProcessor {
             .get_image_path()
             .ok_or_else(|| ProcessorError::ImageNotFound("no image path provided".to_string()))?;
 
-        // Handle both absolute paths and relative paths with image_base_dir
+        // Handle different path formats
         if image_path.starts_with('/') {
+            // Absolute path - return as-is
             Ok(image_path)
         } else if image_path.starts_with("$image_base_dir/") {
+            // Legacy format with $image_base_dir prefix
             let relative_path = image_path.strip_prefix("$image_base_dir/").unwrap();
-            Ok(format!("{}/{}", self.image_base_dir, relative_path))
+            Ok(self.storage_uri.resolve_relative_path(relative_path))
         } else {
-            Ok(format!("{}/{}", self.image_base_dir, image_path))
+            // Relative path - resolve against storage URI
+            Ok(self.storage_uri.resolve_relative_path(&image_path))
         }
     }
 
@@ -299,7 +307,7 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_image_path() {
+    fn test_resolve_image_path_local() {
         let config = create_test_config();
         let processor = ValidationProcessor::new(&config);
 
@@ -334,6 +342,113 @@ mod tests {
 
         let resolved = processor.resolve_image_path(&request).unwrap();
         assert_eq!(resolved, "/tmp/image.jpg");
+
+        // Test simple relative path
+        let request = ProcessingRequest {
+            processing_id: "test".to_string(),
+            image_path: Some("image.jpg".to_string()),
+            image: None,
+            analysis_request: AnalysisRequest {
+                image_path: None,
+                content: "test".to_string(),
+                location: None,
+                datetime: None,
+            },
+        };
+
+        let resolved = processor.resolve_image_path(&request).unwrap();
+        assert_eq!(resolved, "/tmp/image.jpg");
+    }
+
+    #[test]
+    fn test_resolve_image_path_file_uri() {
+        // Create config with file:// URI
+        let config = Config {
+            host: "127.0.0.1".to_string(),
+            port: 3000,
+            image_base_dir: "file:///tmp".to_string(),
+            llm_api_url: "http://localhost:8080".to_string(),
+            llm_model_name: "llava:7b".to_string(),
+            request_timeout_seconds: 30,
+            processing_timeout_minutes: 5,
+            queue_size: 100,
+            throttle_requests_per_minute: 60,
+        };
+        let processor = ValidationProcessor::new(&config);
+
+        // Test absolute path (should be returned as-is)
+        let request = ProcessingRequest {
+            processing_id: "test".to_string(),
+            image_path: Some("/absolute/path/image.jpg".to_string()),
+            image: None,
+            analysis_request: AnalysisRequest {
+                image_path: None,
+                content: "test".to_string(),
+                location: None,
+                datetime: None,
+            },
+        };
+
+        let resolved = processor.resolve_image_path(&request).unwrap();
+        assert_eq!(resolved, "/absolute/path/image.jpg");
+
+        // Test relative path with $image_base_dir (legacy support)
+        let request = ProcessingRequest {
+            processing_id: "test".to_string(),
+            image_path: Some("$image_base_dir/image.jpg".to_string()),
+            image: None,
+            analysis_request: AnalysisRequest {
+                image_path: None,
+                content: "test".to_string(),
+                location: None,
+                datetime: None,
+            },
+        };
+
+        let resolved = processor.resolve_image_path(&request).unwrap();
+        assert_eq!(resolved, "/tmp/image.jpg");
+
+        // Test simple relative path
+        let request = ProcessingRequest {
+            processing_id: "test".to_string(),
+            image_path: Some("image.jpg".to_string()),
+            image: None,
+            analysis_request: AnalysisRequest {
+                image_path: None,
+                content: "test".to_string(),
+                location: None,
+                datetime: None,
+            },
+        };
+
+        let resolved = processor.resolve_image_path(&request).unwrap();
+        assert_eq!(resolved, "/tmp/image.jpg");
+    }
+
+    #[test]
+    fn test_resolve_image_path_no_path() {
+        let config = create_test_config();
+        let processor = ValidationProcessor::new(&config);
+
+        // Test request with no image path
+        let request = ProcessingRequest {
+            processing_id: "test".to_string(),
+            image_path: None,
+            image: None,
+            analysis_request: AnalysisRequest {
+                image_path: None,
+                content: "test".to_string(),
+                location: None,
+                datetime: None,
+            },
+        };
+
+        let result = processor.resolve_image_path(&request);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("no image path provided"));
     }
 
     #[test]
