@@ -1,5 +1,5 @@
+use crate::storage::{StorageError, StorageUri};
 use serde::Deserialize;
-use std::path::Path;
 use std::time::Duration;
 use thiserror::Error;
 
@@ -9,6 +9,8 @@ pub enum ConfigError {
     EnvVar(#[from] envy::Error),
     #[error("Invalid configuration: {0}")]
     Validation(String),
+    #[error("Storage error: {0}")]
+    Storage(#[from] StorageError),
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -50,6 +52,10 @@ impl Config {
         Ok(config)
     }
 
+    pub fn get_storage_uri(&self) -> Result<StorageUri, StorageError> {
+        StorageUri::parse(&self.image_base_dir)
+    }
+
     #[cfg(test)]
     fn from_env_no_dotenv() -> Result<Self, ConfigError> {
         let config: Config = envy::from_env()?;
@@ -58,8 +64,11 @@ impl Config {
     }
 
     fn validate(&self) -> Result<(), ConfigError> {
-        // Validate image base directory exists or can be created
-        if !Path::new(&self.image_base_dir).exists() {
+        // Validate image base directory or URI format
+        let storage_uri = self.get_storage_uri()?;
+
+        // Check if the storage location exists (for local paths and file:// URIs)
+        if !storage_uri.exists() {
             return Err(ConfigError::Validation(format!(
                 "Image base directory does not exist: {}",
                 self.image_base_dir
@@ -254,5 +263,74 @@ mod tests {
         assert_eq!(config.request_timeout(), Duration::from_secs(30));
         assert_eq!(config.processing_timeout(), Duration::from_secs(300)); // 5 minutes
         assert_eq!(config.server_address(), "127.0.0.1:3000");
+    }
+
+    #[test]
+    fn test_config_with_file_uri() {
+        let config = Config {
+            host: "127.0.0.1".to_string(),
+            port: 3000,
+            image_base_dir: "file:///tmp".to_string(),
+            llm_api_url: "http://localhost:8080".to_string(),
+            llm_model_name: "llava:7b".to_string(),
+            request_timeout_seconds: 30,
+            processing_timeout_minutes: 5,
+            queue_size: 100,
+            throttle_requests_per_minute: 60,
+        };
+
+        // Should validate successfully
+        let result = config.validate();
+        assert!(result.is_ok(), "Config validation failed: {:?}", result);
+
+        // Should parse storage URI correctly
+        let storage_uri = config.get_storage_uri().unwrap();
+        assert_eq!(storage_uri.to_local_path(), "/tmp");
+    }
+
+    #[test]
+    fn test_config_with_unsupported_uri() {
+        let config = Config {
+            host: "127.0.0.1".to_string(),
+            port: 3000,
+            image_base_dir: "s3://bucket/path".to_string(),
+            llm_api_url: "http://localhost:8080".to_string(),
+            llm_model_name: "llava:7b".to_string(),
+            request_timeout_seconds: 30,
+            processing_timeout_minutes: 5,
+            queue_size: 100,
+            throttle_requests_per_minute: 60,
+        };
+
+        // Should fail validation due to unsupported scheme
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Unsupported URI scheme"));
+    }
+
+    #[test]
+    fn test_config_with_invalid_file_uri() {
+        let config = Config {
+            host: "127.0.0.1".to_string(),
+            port: 3000,
+            image_base_dir: "file://relative/path".to_string(), // Invalid - must be absolute
+            llm_api_url: "http://localhost:8080".to_string(),
+            llm_model_name: "llava:7b".to_string(),
+            request_timeout_seconds: 30,
+            processing_timeout_minutes: 5,
+            queue_size: 100,
+            throttle_requests_per_minute: 60,
+        };
+
+        // Should fail validation due to invalid URI format
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid URI format"));
     }
 }
