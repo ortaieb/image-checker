@@ -1,4 +1,4 @@
-use image_checker::validation::llm::{LlmClient, validate_image_content};
+use image_checker::validation::llm::{validate_image_content, LlmClient};
 use std::time::Duration;
 
 #[tokio::main]
@@ -24,7 +24,10 @@ async fn main() {
 
     match validate_image_content(&client, image_path, content_description).await {
         Ok(is_valid) => {
-            println!("Validation result: {}", if is_valid { "ACCEPTED" } else { "REJECTED" });
+            println!(
+                "Validation result: {}",
+                if is_valid { "ACCEPTED" } else { "REJECTED" }
+            );
         }
         Err(e) => {
             println!("Validation failed: {}", e);
